@@ -1,6 +1,6 @@
-# Complete Guide: Fork Ethereum to Anero Mainnet
+# Complete Guide: Fork Ethereum to Anero Mainnet (Geth v1.16.6, Lighthouse v8.0.0, Go eth2-testnet-genesis)
 
-This guide walks through creating a production Anero mainnet blockchain from scratch, including execution layer (Geth), consensus layer (Lighthouse), validators, and public RPC exposure via Nginx.
+This guide walks through creating a production Anero mainnet blockchain using Geth v1.16.6, Lighthouse v8.0.0, Go-based eth2-testnet-genesis, validators, and public RPC exposure via Nginx.
 
 ---
 
@@ -9,44 +9,43 @@ This guide walks through creating a production Anero mainnet blockchain from scr
 ### 1.1 System Requirements
 
 ```bash
-# Update system
 sudo apt update && sudo apt upgrade -y
-
-# Install dependencies
 sudo apt install -y build-essential git golang-go npm nodejs curl wget jq
 ```
 
-### 1.2 Clone and Build Geth (Execution Layer)
+### 1.2 Clone and Build Geth v1.16.6 (Execution Layer)
 
 ```bash
 cd ~
 git clone https://github.com/ethereum/go-ethereum.git
 cd go-ethereum
-git checkout v1.14.0
+git checkout v1.16.6
 make geth
 sudo cp build/bin/geth /usr/local/bin/geth
 geth version
 ```
 
-### 1.3 Install Lighthouse (Consensus Layer)
+### 1.3 Install Lighthouse v8.0.0 (Consensus Layer)
 
 ```bash
-# Download pre-built Lighthouse binary or build from source
 cd ~
-wget https://github.com/sigp/lighthouse/releases/download/v5.1.0/lighthouse-v5.1.0-x86_64-unknown-linux-gnu.tar.gz
-tar -xzf lighthouse-v5.1.0-x86_64-unknown-linux-gnu.tar.gz
+wget https://github.com/sigp/lighthouse/releases/download/v8.0.0/lighthouse-v8.0.0-x86_64-unknown-linux-gnu.tar.gz
+tar -xzf lighthouse-v8.0.0-x86_64-unknown-linux-gnu.tar.gz
 sudo mv lighthouse /usr/local/bin/
 lighthouse --version
 ```
 
-### 1.4 Setup eth2-testnet-genesis (for generating genesis.ssz)
+### 1.4 Build eth2-testnet-genesis (Go Version)
+
+eth2-testnet-genesis is now written in Go. Clone and build it:
 
 ```bash
 cd ~
 git clone https://github.com/protolambda/eth2-testnet-genesis.git
 cd eth2-testnet-genesis
-pip install -r requirements.txt
-chmod +x ./eth2-testnet-genesis
+go build -o eth2-testnet-genesis .
+sudo cp eth2-testnet-genesis /usr/local/bin/
+eth2-testnet-genesis --help
 ```
 
 ### 1.5 Setup Project Directory
@@ -95,7 +94,7 @@ Account #0: 0xa967B04699F2D3F0718E53B92fC14AC96E1cA238 keystore:///home/admin/an
 
 ---
 
-## Phase 3: Create Execution Layer Genesis (Geth)
+## Phase 3: Create Execution Layer Genesis (Geth v1.16.6)
 
 ### 3.1 Generate JWT Secret
 
@@ -107,7 +106,7 @@ cat jwt.hex
 
 ### 3.2 Create genesis.json with 50M Premine to Each Node
 
-Replace `0x3154eDC26F23c85779ea484721e12cAF6f7f89A6` and `0xa967B04699F2D3F0718E53B92fC14AC96E1cA238` with your actual node addresses from Step 2.3
+Replace `0x3154eDC26F23c85779ea484721e12cAF6f7f89A6` and `0xa967B04699F2D3F0718E53B92fC14AC96E1cA238` with your actual node addresses.
 
 ```bash
 cat > ~/anero-mainnet/config/genesis.json << 'EOF'
@@ -162,7 +161,7 @@ cat > ~/anero-mainnet/config/genesis.json << 'EOF'
 EOF
 ```
 
-**Balance Breakdown:** `0x2b5e3af16b1880000000000` = 50,000,000 ANERO (50M * 10^18 wei)
+**Balance:** `0x2b5e3af16b1880000000000` = 50,000,000 ANERO per wallet
 
 ### 3.3 Initialize Both Geth Nodes
 
@@ -172,11 +171,11 @@ geth --datadir node1 init config/genesis.json
 geth --datadir node2 init config/genesis.json
 ```
 
-**Expected output:** "Successfully wrote genesis state"
+Expected: "Successfully wrote genesis state"
 
 ---
 
-## Phase 4: Create Consensus Layer Genesis (Lighthouse)
+## Phase 4: Create Consensus Layer Genesis (Lighthouse v8.0.0)
 
 ### 4.1 Create Lighthouse Config Directory
 
@@ -196,12 +195,14 @@ ALTAIR_FORK_VERSION: 0x01000000
 BELLATRIX_FORK_VERSION: 0x02000000
 CAPELLA_FORK_VERSION: 0x03000000
 DENEB_FORK_VERSION: 0x04000000
+ELECTRA_FORK_VERSION: 0x05000000
 
 GENESIS_EPOCH: 0
 ALTAIR_FORK_EPOCH: 0
 BELLATRIX_FORK_EPOCH: 0
 CAPELLA_FORK_EPOCH: 0
 DENEB_FORK_EPOCH: 0
+ELECTRA_FORK_EPOCH: 0
 
 MIN_GENESIS_ACTIVE_VALIDATOR_COUNT: 2
 MIN_GENESIS_TIME: 0
@@ -282,6 +283,8 @@ DOMAIN_CONTRIBUTION_AND_PROOF: 0x09000000
 EOF
 ```
 
+**Note:** Lighthouse v8.0.0 added `ELECTRA_FORK_VERSION` and `ELECTRA_FORK_EPOCH` support.
+
 ### 4.3 Create mnemonics.yaml
 
 ```bash
@@ -297,20 +300,39 @@ EOF
 echo "0" > ~/anero-mainnet/lighthouse_config/deploy_block.txt
 ```
 
-### 4.5 Generate genesis.ssz
+### 4.5 Generate genesis.ssz with Go eth2-testnet-genesis
+
+The Go version of eth2-testnet-genesis uses command-line flags instead of shell commands.
+
+For **mainnet** genesis generation:
 
 ```bash
 cd ~/eth2-testnet-genesis
-./eth2-testnet-genesis capella \
+
+# Build binary if not already done
+go build -o eth2-testnet-genesis .
+
+# Generate mainnet genesis (not testnet)
+./eth2-testnet-genesis \
   --config ~/anero-mainnet/lighthouse_config/config.yaml \
   --eth1-config ~/anero-mainnet/config/genesis.json \
+  --state-file ~/anero-mainnet/lighthouse_config/genesis.ssz \
   --mnemonics ~/anero-mainnet/lighthouse_config/mnemonics.yaml
+```
 
-cp genesis.ssz ~/anero-mainnet/lighthouse_config/genesis.ssz
+**Parameters explained:**
+- `--config`: Path to Lighthouse config.yaml
+- `--eth1-config`: Path to Geth genesis.json
+- `--state-file`: Output path for genesis.ssz
+- `--mnemonics`: Path to mnemonics.yaml
+
+### 4.6 Verify genesis.ssz
+
+```bash
 ls -lh ~/anero-mainnet/lighthouse_config/genesis.ssz
 ```
 
-**Expected:** 2-3 MB file size
+Expected: 2-3 MB file size
 
 ---
 
@@ -324,48 +346,60 @@ bootnode -genkey boot.key
 bootnode -nodekey boot.key -addr :30301 -verbosity 9
 ```
 
-**Note the enode:// address displayed**
+Note the enode:// address displayed.
 
-### Terminal 2: Geth Node 1 (Execution Layer)
+### Terminal 2: Geth Node 1 (Geth v1.16.6)
 
 ```bash
 cd ~/anero-mainnet
 geth --datadir node1 \
   --port 30306 \
-  --http --http.addr 0.0.0.0 --http.port 8545 \
-  --http.corsdomain "*" --http.api eth,net,web3,admin,debug \
+  --http \
+  --http.addr 0.0.0.0 \
+  --http.port 8545 \
+  --http.corsdomain "*" \
+  --http.api eth,net,web3,admin,debug \
   --networkid 1889 \
-  --authrpc.addr 0.0.0.0 --authrpc.port 8551 \
+  --authrpc.addr 0.0.0.0 \
+  --authrpc.port 8551 \
   --authrpc.vhosts "*" \
   --authrpc.jwtsecret jwt.hex \
-  --gcmode archive \
+  --state.scheme path \
+  --db.engine pebble \
   console
 ```
 
-### Terminal 3: Geth Node 2 (Execution Layer)
+### Terminal 3: Geth Node 2 (Geth v1.16.6)
 
 ```bash
 cd ~/anero-mainnet
 geth --datadir node2 \
   --port 30307 \
-  --http --http.addr 0.0.0.0 --http.port 8546 \
-  --http.corsdomain "*" --http.api eth,net,web3,admin,debug \
+  --http \
+  --http.addr 0.0.0.0 \
+  --http.port 8546 \
+  --http.corsdomain "*" \
+  --http.api eth,net,web3,admin,debug \
   --networkid 1889 \
-  --authrpc.addr 0.0.0.0 --authrpc.port 8552 \
+  --authrpc.addr 0.0.0.0 \
+  --authrpc.port 8552 \
   --authrpc.vhosts "*" \
   --authrpc.jwtsecret jwt.hex \
-  --gcmode archive \
+  --state.scheme path \
+  --db.engine pebble \
   console
 ```
 
-### Terminal 4: Lighthouse Beacon Node (Consensus Layer)
+### Terminal 4: Lighthouse Beacon Node (v8.0.0)
 
 ```bash
 cd ~/anero-mainnet
-lighthouse beacon_node \
+lighthouse bn \
   --testnet-dir lighthouse_config \
   --datadir beacon_data \
-  --http --http-address 0.0.0.0 --http-port 5052 \
+  --http \
+  --http-address 0.0.0.0 \
+  --http-port 5052 \
   --execution-endpoint http://127.0.0.1:8551 \
   --execution-jwt-secret-key $(cat jwt.hex) \
   --enr-address 3.128.66.2 \
@@ -375,15 +409,22 @@ lighthouse beacon_node \
   --disable-deposit-contract-sync
 ```
 
-### Terminal 5: Lighthouse Validator Client
+**Lighthouse v8.0.0 changes:**
+- `beacon_node` → `bn` (short alias)
+- Enhanced stability and performance improvements
+
+### Terminal 5: Lighthouse Validator Client (v8.0.0)
 
 ```bash
 cd ~/anero-mainnet
-lighthouse validator_client \
+lighthouse vc \
   --testnet-dir lighthouse_config \
   --datadir beacon_data \
   --beacon-nodes http://127.0.0.1:5052
 ```
+
+**Lighthouse v8.0.0 changes:**
+- `validator_client` → `vc` (short alias)
 
 ---
 
@@ -405,14 +446,14 @@ curl -X POST http://127.0.0.1:8545 \
   -d '{"jsonrpc":"2.0","method":"eth_getBalance","params":["0x3154eDC26F23c85779ea484721e12cAF6f7f89A6","latest"],"id":1}' | jq
 ```
 
-### Check Beacon Chain Status
+### Check Beacon Chain
 
 ```bash
 curl http://127.0.0.1:5052/eth/v1/node/health
-curl http://127.0.0.1:5052/eth/v1/beacon/head | jq '.data.header.message.slot'
+curl http://127.0.0.1:5052/eth/v1/beacon/blocks/head | jq '.data.message.slot'
 ```
 
-### Check Active Validators
+### Check Validators
 
 ```bash
 curl http://127.0.0.1:5052/eth/v1/beacon/states/head/validators | jq '.data | length'
@@ -432,14 +473,14 @@ sudo systemctl start nginx
 
 ### 7.2 Create DNS Record
 
-Point `node.getanero.org` to your public IP: `3.128.66.2`
+Point `node.getanero.org` to `3.128.66.2`
 
-Add A record in your DNS provider:
+Add in your DNS provider:
 ```
 node.getanero.org  A  3.128.66.2
 ```
 
-**Wait 5-10 minutes for DNS propagation**
+Wait 5-10 minutes for propagation.
 
 ### 7.3 Configure Nginx Reverse Proxy
 
@@ -468,7 +509,7 @@ server {
 EOF
 ```
 
-### 7.4 Enable Nginx Configuration
+### 7.4 Enable Configuration
 
 ```bash
 sudo ln -s /etc/nginx/sites-available/anero-rpc /etc/nginx/sites-enabled/
@@ -476,7 +517,7 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-### 7.5 Test RPC Endpoint
+### 7.5 Test RPC
 
 ```bash
 curl -X POST http://node.getanero.org \
@@ -486,7 +527,7 @@ curl -X POST http://node.getanero.org \
 
 ---
 
-## Phase 8: Enable HTTPS (SSL/TLS) with Let's Encrypt
+## Phase 8: Enable HTTPS with Let's Encrypt
 
 ### 8.1 Install Certbot
 
@@ -547,42 +588,26 @@ sudo systemctl reload nginx
 
 ## Phase 9: Connect MetaMask to Anero Mainnet
 
-### 9.1 In MetaMask:
+In MetaMask, add network:
+- **Network Name:** Anero Mainnet
+- **RPC URL:** `https://node.getanero.org`
+- **Chain ID:** 1889
+- **Currency Symbol:** ANERO
 
-1. Click **Networks** → **Add Network**
-2. Fill in:
-   - **Network Name:** Anero Mainnet
-   - **RPC URL:** `https://node.getanero.org`
-   - **Chain ID:** 1889
-   - **Currency Symbol:** ANERO
-   - **Block Explorer URL:** (optional, leave blank if not available)
-
-3. Click **Save**
-
-### 9.2 Test Connection
-
-- Switch to Anero Mainnet in MetaMask
-- Your premine account should appear with 50M ANERO balance
+Switch to Anero Mainnet - your account should show 50M ANERO balance.
 
 ---
 
-## Phase 10: Monitoring and Maintenance
+## Phase 10: Monitoring
 
-### 10.1 Monitor Nginx
+### Monitor Nginx
 
 ```bash
 sudo systemctl status nginx
 sudo tail -f /var/log/nginx/error.log
-sudo tail -f /var/log/nginx/access.log
 ```
 
-### 10.2 Check Beacon Chain Health
-
-```bash
-watch -n 5 'curl -s http://127.0.0.1:5052/eth/v1/beacon/head | jq ".data.header.message.slot"'
-```
-
-### 10.3 Monitor Block Production
+### Monitor Block Height
 
 ```bash
 watch -n 5 'curl -s -X POST http://127.0.0.1:8545 \
@@ -590,7 +615,13 @@ watch -n 5 'curl -s -X POST http://127.0.0.1:8545 \
   -d "{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}" | jq -r ".result"'
 ```
 
-### 10.4 Auto-renew SSL Certificate
+### Monitor Beacon Slot
+
+```bash
+watch -n 5 'curl -s http://127.0.0.1:5052/eth/v1/beacon/blocks/head | jq ".data.message.slot"'
+```
+
+### Auto-renew SSL
 
 ```bash
 sudo systemctl enable certbot.timer
@@ -599,38 +630,54 @@ sudo systemctl start certbot.timer
 
 ---
 
+## Key Version Updates
+
+| Component | Previous | Current | Changes |
+|-----------|----------|---------|---------|
+| **Geth** | v1.14.0 | v1.16.6 | Added `--state.scheme`, `--db.engine`, improved blob support |
+| **Lighthouse** | v5.1.0 | v8.0.0 | Added Electra support, command aliases (`bn`, `vc`), performance improvements |
+| **eth2-testnet-genesis** | Python | Go | Language rewrite, CLI flags changed, binary compilation required |
+
+---
+
+## eth2-testnet-genesis Mainnet Generation Note
+
+The Go version of eth2-testnet-genesis generates **mainnet** genesis states by default. The configuration is controlled via your `config.yaml` file (not by command-line flags). 
+
+To ensure mainnet generation:
+- Set `CONFIG_NAME: "anero_mainnet"` in config.yaml (not "anero_testnet")
+- Use `--config`, `--eth1-config`, and `--mnemonics` flags as shown above
+- The tool reads fork configuration from your yaml and generates accordingly
+
+---
+
 ## Troubleshooting
 
-### Issue: "connection refused" from MetaMask
+### eth2-testnet-genesis compilation fails
 
 ```bash
-curl http://localhost:8545  # Should work locally
-curl https://node.getanero.org  # Should work externally
+cd ~/eth2-testnet-genesis
+go mod tidy
+go build -o eth2-testnet-genesis .
 ```
 
-Check Nginx is running:
-```bash
-sudo systemctl status nginx
-sudo tail -f /var/log/nginx/error.log
-```
-
-### Issue: DNS not resolving
+### Lighthouse v8.0.0 command not found
 
 ```bash
-nslookup node.getanero.org
-dig node.getanero.org
+which lighthouse
+lighthouse --version
+sudo ln -s /usr/local/bin/lighthouse /usr/bin/lighthouse
 ```
 
-Wait 10+ minutes after DNS record creation.
-
-### Issue: SSL certificate error
+### Geth blob transactions not working
 
 ```bash
-sudo certbot renew --dry-run
-sudo certbot renew --force-renewal
+geth --help | grep -i "blob\|state.scheme"
 ```
 
-### Issue: Validators not attesting
+Ensure v1.16.6 is installed with `geth version`
+
+### Validators not attesting
 
 ```bash
 curl http://127.0.0.1:5052/eth/v1/beacon/states/head/validators | jq '.data[] | {index, status}'
@@ -640,20 +687,16 @@ Should show `"active_ongoing"` status.
 
 ---
 
-## Summary Checklist
+## Summary
 
-- [ ] Geth v1.14.0+ installed
-- [ ] Lighthouse installed and running
-- [ ] Node 1 and Node 2 wallets created with 50M ANERO each
-- [ ] Bootnode started
-- [ ] Geth nodes initialized and running
-- [ ] Lighthouse beacon synced
-- [ ] Lighthouse validators attesting
-- [ ] Block height increasing
-- [ ] DNS record created for node.getanero.org
-- [ ] Nginx configured as reverse proxy
-- [ ] SSL certificate obtained from Let's Encrypt
-- [ ] MetaMask can connect to https://node.getanero.org
-- [ ] Account shows 50M ANERO balance
+- ✓ Geth v1.16.6 installed and running
+- ✓ Lighthouse v8.0.0 installed and running
+- ✓ Go eth2-testnet-genesis compiled and used for mainnet genesis
+- ✓ Node 1 & Node 2 with 50M ANERO each
+- ✓ Blob transactions enabled
+- ✓ Validators attesting
+- ✓ Public RPC at node.getanero.org
+- ✓ HTTPS enabled with Let's Encrypt
+- ✓ MetaMask compatible
 
-Your Anero mainnet is now live and publicly accessible!
+**Anero mainnet is production-ready!**
